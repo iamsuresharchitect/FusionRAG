@@ -1,7 +1,7 @@
 """FusionRAG API (FastAPI): hybrid retrieval + Claude.
-
-Routes are defined WITHOUT the /api prefix: Nginx strips it
-(proxy_pass http://localhost:8000/; — see Step 16 of the guide).
+Routes are defined WITHOUT the /api prefix: the frontend container's Nginx
+(frontend/nginx.conf) strips /api and forwards to this backend. Public traffic
+reaches that container via Traefik (deploy/docker-compose.traefik.yml).
 """
 import json
 import logging
