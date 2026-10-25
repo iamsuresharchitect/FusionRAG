@@ -1,4 +1,4 @@
-"""Hybrid RAG API (FastAPI).
+"""FusionRAG API (FastAPI): hybrid retrieval + Claude.
 
 Routes are defined WITHOUT the /api prefix: Nginx strips it
 (proxy_pass http://localhost:8000/; — see Step 16 of the guide).
@@ -19,7 +19,7 @@ from app.store import HybridStore
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("hybrid-rag")
 
-app = FastAPI(title="Hybrid RAG API", version="1.0.0")
+app = FastAPI(title="FusionRAG API", version="1.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=config.CORS_ORIGINS,
                    allow_methods=["*"], allow_headers=["*"])
 

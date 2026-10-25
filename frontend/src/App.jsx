@@ -155,7 +155,7 @@ export default function App() {
         <div className="brand">
           <span className="logo">◮</span>
           <div>
-            <h1>Hybrid RAG</h1>
+            <h1>FusionRAG</h1>
             <p className="muted small">{config ? `${config.model} · ${config.embed_model}` : 'connecting…'}</p>
           </div>
         </div>

@@ -1,12 +1,16 @@
+# FusionRAG: hybrid RAG (BM25 + vectors + RRF) answered by Claude.
+#
+# Laptop:  docker compose up --build        -> http://localhost:3000
+# VPS:     the root .env adds deploy/docker-compose.traefik.yml so Traefik
+#          serves https://APP_DOMAIN (see README, Part 2).
 services:
 
   backend:
     build: ./backend
     container_name: rag-backend
     ports:
-      # host port : container port. BIND_IP defaults to 0.0.0.0 so you can test
-      # http://SERVER_IP:8000/docs. After Nginx works, set BIND_IP=127.0.0.1 in
-      # the root .env so the API is only reachable through Nginx.
+      # BIND_IP defaults to 0.0.0.0 (handy for testing on the laptop).
+      # The VPS sets BIND_IP=127.0.0.1 so 8000 is not reachable from the internet.
       - "${BIND_IP:-0.0.0.0}:8000:8000"
     env_file:
       - ./backend/.env

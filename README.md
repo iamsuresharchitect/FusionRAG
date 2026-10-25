@@ -1,133 +1,157 @@
-# Hybrid RAG with Claude — deploy to Hostinger VPS
+# FusionRAG: hybrid RAG with Claude
 
 Upload PDFs/DOCX/TXT/MD/CSV, ask questions, get answers from **Claude (Anthropic API)** with numbered citations.
+Live at **https://app.srmai.tech** (Hostinger VPS, behind Traefik).
 
-**Why "hybrid"?** Every question runs two searches and merges them:
+**Why "fusion"?** Every question runs two searches and fuses the results:
 
 | Retriever | Good at | Implementation |
 |---|---|---|
-| Vector (semantic) | Meaning, paraphrases ("backup failed" ≈ "job did not complete") | `fastembed` + `BAAI/bge-small-en-v1.5`, runs on CPU, no extra API key |
+| Vector (semantic) | Meaning, paraphrases ("backup failed" ≈ "job did not complete") | `fastembed` + `BAAI/bge-small-en-v1.5`, CPU, no extra API key |
 | BM25 (keyword) | Exact terms: error codes, hostnames, KB numbers (`19:1131`, `AHV`) | Built-in Okapi BM25 |
 | Fusion | Best of both | Reciprocal Rank Fusion (RRF, k=60) |
 
-The top passages go to Claude, which answers only from them. The UI lets you switch **Hybrid / Vector / Keyword** to compare, and shows each source's vector rank, BM25 rank and RRF score.
+The top passages go to Claude, which answers only from them. The UI can switch **Hybrid / Vector / Keyword** and shows each source's vector rank, BM25 rank and RRF score.
+
+## Architecture (production)
 
 ```
-Browser ─► Nginx :443 ─┬─ /      ─► frontend container (React, nginx)  :3000
-                       └─ /api/* ─► backend container  (FastAPI)       :8000 ─► Claude API
-                                          │
-                                          └─ Docker volume rag-data (index persists)
+Browser ──HTTPS──► Traefik :443 (shared with n8n, auto Let's Encrypt)
+                      │  Host(`app.srmai.tech`)
+                      ▼
+               rag-frontend (React build + Nginx :80)
+                      │  /api/*  (prefix stripped)
+                      ▼
+               rag-backend (FastAPI :8000) ──► Claude API
+                      │
+                      └─ Docker volume fusionrag_rag-data (index persists)
+
+Host ports 3000/8000 are bound to 127.0.0.1 only; the public way in is HTTPS via Traefik.
 ```
 
-## Project layout (matches the guide, Step 1)
+## Project layout
 
 ```
-hybrid-rag/
+FusionRAG/
 ├── backend/
 │   ├── app/            config.py · ingest.py (parse+chunk) · store.py (hybrid index) · llm.py (Claude)
-│   ├── main.py         FastAPI routes: /health /config /documents /search /chat (SSE streaming)
+│   ├── main.py         FastAPI: /health /config /documents /search /chat (SSE streaming)
 │   ├── requirements.txt
-│   ├── Dockerfile      Step 2 (also bakes the embedding model into the image)
-│   ├── .dockerignore   Step 4
-│   └── .env.example    copy to .env  ← secrets, never pushed
+│   ├── Dockerfile      bakes the embedding model into the image
+│   └── .env.example    → copy to backend/.env (API key, admin token). Never committed.
 ├── frontend/
 │   ├── src/            React (Vite) chat UI
-│   ├── nginx.conf      Step 3 (+ /api proxy so localhost:3000 works end to end)
-│   ├── Dockerfile      Step 3 multi-stage build
-│   └── .dockerignore   Step 4
+│   ├── nginx.conf      serves the SPA + proxies /api to the backend container
+│   └── Dockerfile      multi-stage build
 ├── deploy/
-│   ├── nginx-site.conf Step 16 host Nginx config (with upload size + streaming fixes)
-│   ├── setup-vps.sh    Steps 8–9 + Nginx/Certbot/ufw/swap in one script
-│   └── redeploy.sh     Part 3 redeploy loop
-├── docker-compose.yml  Step 5
-└── .gitignore          Step 7
+│   ├── docker-compose.traefik.yml   Traefik labels (production add-on)
+│   ├── setup-vps.sh                 one-time server prep (detects Traefik)
+│   ├── redeploy.sh                  git pull + rebuild + health check
+│   └── nginx-site.conf              only for Option B (server without Traefik)
+├── docker-compose.yml  base stack (laptop + VPS)
+├── .env.example        → copy to .env on the VPS (domain, Traefik add-on, private ports)
+└── .gitignore
 ```
 
-## Part 1 — on your laptop
+Two different `.env` files:
 
-```bash
-cd hybrid-rag
-cp backend/.env.example backend/.env       # then edit: ANTHROPIC_API_KEY, ADMIN_TOKEN
-cd frontend && npm install && cd ..        # creates package-lock.json (commit it)
-docker compose up --build                  # Step 6
+| File | Read by | Contains | Where |
+|---|---|---|---|
+| `backend/.env` | the FastAPI app | `ANTHROPIC_API_KEY`, `ADMIN_TOKEN`, model | laptop + VPS |
+| `.env` (root) | `docker compose` | `COMPOSE_FILE`, `APP_DOMAIN`, `BIND_IP` | VPS only |
+
+## Part 1: run on your laptop
+
+```powershell
+cd FusionRAG
+copy backend\.env.example backend\.env      # edit: ANTHROPIC_API_KEY (ADMIN_TOKEN optional locally)
+docker compose up --build
 ```
-- http://localhost:3000 → the app (upload a file, ask a question)
-- http://localhost:8000/docs → FastAPI docs
+- http://localhost:3000 → the app
+- http://localhost:8000/docs → FastAPI test page
+- Logs: `docker compose logs -f backend`
 
-Push to GitHub (Step 7): `git init && git add . && git status` — **`backend/.env` must NOT appear** — then commit and push.
+No root `.env` is needed on the laptop. Push changes with GitHub Desktop (Commit to main → Push origin).
 
-## Part 2 — on the Hostinger VPS
+## Part 2: deploy on the Hostinger VPS (Traefik)
 
-Hostinger: choose **KVM 1 or higher** with the **Ubuntu 24.04** template. hPanel shows the IP and root password.
+Hostinger's Docker template (e.g. the n8n one) already runs **Traefik** on ports 80/443.
+FusionRAG plugs into it with labels; no Nginx or Certbot on the host.
 
+1. **DNS** (hPanel → Domains → DNS records): `A  app  → VPS_IP`. Check: `curl -4 ifconfig.me` on the VPS matches.
+2. **Clone** (private repo → use a GitHub Personal Access Token as the password):
+   ```bash
+   git clone https://github.com/iamsuresharchitect/FusionRAG.git
+   cd FusionRAG
+   ```
+3. **Prepare the server** (updates, Docker, swap, ufw; restarts Traefik after a Docker upgrade):
+   ```bash
+   sudo bash deploy/setup-vps.sh
+   ```
+4. **Secrets**:
+   ```bash
+   cp backend/.env.example backend/.env && nano backend/.env    # API key + admin token
+   cp .env.example .env && nano .env                            # APP_DOMAIN=app.srmai.tech
+   ```
+5. **Start**:
+   ```bash
+   docker compose up --build -d
+   docker compose ps                                  # ports show 127.0.0.1:...
+   curl http://127.0.0.1:3000/api/health              # {"status":"ok",...}
+   ```
+6. Open **https://APP_DOMAIN**. The first visit takes ~30 s while Traefik gets the certificate.
+7. If `/var/run/reboot-required` exists, `reboot`; all containers restart on their own.
+
+### Option B: a server WITHOUT Traefik
+Comment out `COMPOSE_FILE` in the root `.env`, then use host Nginx + Certbot:
 ```bash
-ssh root@YOUR_VPS_IP                                   # Step 8
-git clone https://github.com/USERNAME/hybrid-rag.git   # Step 11 (use your PAT as password if private)
-cd hybrid-rag
-sudo bash deploy/setup-vps.sh                          # Step 9 + Nginx, Certbot, ufw, swap
-exit                                                   # log out/in for the docker group
-ssh root@YOUR_VPS_IP && cd hybrid-rag
-
-nano backend/.env                                      # recreate secrets (copy from .env.example)
-docker compose up --build -d                           # Step 12 (first build ~5–8 min)
-docker ps                                              # Step 13: both "Up"
-```
-Test http://YOUR_VPS_IP:3000 before DNS. If it doesn't load, check **hPanel → VPS → Firewall**.
-
-**DNS (Steps 14–15)** — hPanel → Domains → DNS / Nameservers → DNS records: delete the default parking A records, add `A @ → VPS_IP` and `A www → VPS_IP`. Check on dnschecker.org.
-
-**Nginx (Steps 16–17)**
-```bash
-sudo cp deploy/nginx-site.conf /etc/nginx/sites-available/yourdomain.com
-sudo sed -i 's/yourdomain.com/YOUR-REAL-DOMAIN/g' /etc/nginx/sites-available/yourdomain.com
-sudo ln -s /etc/nginx/sites-available/yourdomain.com /etc/nginx/sites-enabled/
-sudo rm -f /etc/nginx/sites-enabled/default
-sudo nginx -t && sudo systemctl reload nginx
-```
-
-**SSL (Step 18)**
-```bash
-sudo certbot --nginx -d YOUR-REAL-DOMAIN -d www.YOUR-REAL-DOMAIN    # choose Redirect
-sudo certbot renew --dry-run
-```
-
-**Lock the ports (recommended once HTTPS works).** Docker-published ports bypass `ufw`, so close 3000/8000 to the internet:
-```bash
-echo "BIND_IP=127.0.0.1" > .env        # root .env, read by docker compose
-docker compose up -d                   # now only Nginx can reach the containers
+sudo apt install -y nginx certbot python3-certbot-nginx
+sudo cp deploy/nginx-site.conf /etc/nginx/sites-available/APP_DOMAIN   # replace yourdomain.com inside
+sudo ln -s /etc/nginx/sites-available/APP_DOMAIN /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default && sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d APP_DOMAIN
 ```
 
 ## Redeploy after changes
-Laptop: `git add . && git commit -m "..." && git push` → VPS: `bash deploy/redeploy.sh`.
-Your indexed documents live in the `rag-data` volume and survive redeploys (`docker compose down -v` deletes them).
+Laptop: commit + push → VPS:
+```bash
+cd ~/FusionRAG && bash deploy/redeploy.sh
+```
+Indexed documents live in the `fusionrag_rag-data` volume and survive redeploys (`docker compose down -v` deletes them).
 
 ## Configuration (`backend/.env`)
 
 | Variable | Default | Notes |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | — | Required. console.anthropic.com → API Keys |
+| `ANTHROPIC_API_KEY` | none | Required. console.anthropic.com → API Keys |
 | `CLAUDE_MODEL` | `claude-sonnet-5-5` | `claude-haiku-5-5` cheaper/faster, `claude-opus-5-5` strongest |
 | `ADMIN_TOKEN` | empty | When set, upload/delete need it (UI asks once). Chat stays open |
 | `TOP_K` | 6 | Passages sent to Claude (adjustable in the UI) |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | 1000 / 150 | Characters |
-| `MAX_UPLOAD_MB` | 25 | Keep in sync with `client_max_body_size` in both Nginx files |
+| `MAX_UPLOAD_MB` | 25 | Also `client_max_body_size` in `frontend/nginx.conf` |
 
 ## API
-| Method | Path (via Nginx add `/api`) | Purpose |
+| Method | Path (public: prefix `/api`) | Purpose |
 |---|---|---|
 | GET | `/health` | Status, doc/chunk counts |
+| GET | `/config` | Model names, whether key/admin token are set |
 | GET | `/documents` | List indexed docs |
 | POST | `/documents` | Upload (multipart `files`, header `X-Admin-Token`) |
 | DELETE | `/documents/{id}` | Remove a doc |
 | POST | `/search` | Retrieval only `{query, mode, top_k}` |
 | POST | `/chat` | `{question, history, mode, top_k}` → SSE: `sources`, `token`, `error`, `done` |
 
-## Troubleshooting (in addition to the guide's table)
-| Symptom | Fix |
+## Troubleshooting
+
+| Symptom | Cause / fix |
 |---|---|
-| `413 Request Entity Too Large` on upload | `client_max_body_size 25m;` missing in host Nginx config → use `deploy/nginx-site.conf` |
-| Answer appears all at once, not streaming | `proxy_buffering off;` in the `/api/` block |
-| "ANTHROPIC_API_KEY is missing" banner | Fill `backend/.env`, then `docker compose up -d` |
-| `401 Admin token required` | Paste `ADMIN_TOKEN` into the sidebar field |
-| "No readable text found" | Scanned PDF — OCR it first (e.g. `ocrmypdf in.pdf out.pdf`) |
-| Backend build `Killed` | Swap missing — `setup-vps.sh` adds 2 GB |
+| Plain text `404 page not found` + "Not secure" | Traefik has no route. Check labels: `docker inspect rag-frontend --format '{{json .Config.Labels}}'`. Missing → root `.env` (`COMPOSE_FILE`, `APP_DOMAIN`) absent; `docker compose up -d` again |
+| Traefik log: `Cannot connect to the Docker daemon at unix:///var/run/docker.sock` | Docker was upgraded/restarted; Traefik holds a dead socket → `docker restart traefik-traefik-1` |
+| "Not secure" only in your normal browser window | Cached earlier failure. Close all tabs of the site or test in Incognito |
+| `nginx: port 80 is already in use` during setup | Traefik owns 80/443; expected. Use Part 2 (Traefik), not Option B |
+| Build fails: `Could not load model BAAI/bge-small-en-v1.5` | HuggingFace blocked on that network. Use another network, or `--build-arg HF_ENDPOINT=https://hf-mirror.com` |
+| `/chat` logs `200 OK` but the UI shows an error | Streaming sends 200 first. Look for `ERROR Claude call failed` in `docker compose logs backend` (bad key/model/credits) |
+| `401 Admin token required` | Paste `ADMIN_TOKEN` into the sidebar |
+| "No readable text found" | Scanned PDF → OCR first (`ocrmypdf in.pdf out.pdf`) |
+| Backend build `Killed` | No swap → `setup-vps.sh` adds 2 GB |
+| n8n reachable on `http://VPS_IP:32768` | Hostinger template publishes it; restrict in hPanel → VPS → Firewall (allow 22, 80, 443) |

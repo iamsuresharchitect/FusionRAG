@@ -14,9 +14,14 @@ COPY requirements.txt .
 # 4. Install the Python packages
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 4b. Bake the embedding model into the image so the first upload is fast
-#     and the container never needs to download it at run time (~130 MB)
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5', cache_dir='/opt/models')"
+# 4b. Try to bake the embedding model into the image (~130 MB) so the first
+#     upload is fast. If HuggingFace is blocked (office proxy / firewall) the
+#     build continues and the model downloads on the first upload instead.
+#     Optional mirror: docker compose build --build-arg HF_ENDPOINT=https://hf-mirror.com
+ARG HF_ENDPOINT=https://huggingface.co
+ENV HF_ENDPOINT=${HF_ENDPOINT}
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5', cache_dir='/opt/models')" \
+    || echo "WARNING: embedding model not pre-downloaded; it will download on first upload"
 
 # 5. Now copy the rest of the source code
 COPY . .

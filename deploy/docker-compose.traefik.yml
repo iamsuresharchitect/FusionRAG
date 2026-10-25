@@ -1,0 +1,23 @@
+# Production add-on: publish FusionRAG through an existing Traefik reverse proxy
+# (Hostinger's Docker template runs Traefik on ports 80/443 for n8n and other apps).
+#
+# Not used on your laptop. On the VPS it is switched on by the root .env file:
+#   COMPOSE_FILE=docker-compose.yml:deploy/docker-compose.traefik.yml
+#   APP_DOMAIN=app.srmai.tech
+#
+# Traefik watches Docker for these labels, routes https://APP_DOMAIN to the
+# frontend container and gets/renews the Let's Encrypt certificate itself.
+# The frontend's own Nginx forwards /api/* to the backend, so the backend
+# needs no labels and is never exposed directly.
+#
+# The entrypoint ("websecure") and resolver ("letsencrypt") names must match
+# Traefik's settings. Check with:
+#   docker inspect traefik-traefik-1 --format '{{json .Config.Cmd}}'
+services:
+  frontend:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.fusionrag.rule=Host(`${APP_DOMAIN:?Set APP_DOMAIN in the root .env file}`)"
+      - "traefik.http.routers.fusionrag.entrypoints=websecure"
+      - "traefik.http.routers.fusionrag.tls.certresolver=letsencrypt"
+      - "traefik.http.services.fusionrag.loadbalancer.server.port=80"

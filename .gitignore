@@ -3,6 +3,9 @@
 *.env
 !.env.example
 
+# Machine-specific compose overrides (VPS settings go in the root .env instead)
+docker-compose.override.yml
+
 # Dependencies
 node_modules/
 venv/
