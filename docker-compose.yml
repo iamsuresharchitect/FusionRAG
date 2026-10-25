@@ -1,0 +1,37 @@
+services:
+
+  backend:
+    build: ./backend
+    container_name: rag-backend
+    ports:
+      # host port : container port. BIND_IP defaults to 0.0.0.0 so you can test
+      # http://SERVER_IP:8000/docs. After Nginx works, set BIND_IP=127.0.0.1 in
+      # the root .env so the API is only reachable through Nginx.
+      - "${BIND_IP:-0.0.0.0}:8000:8000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATA_DIR=/data
+    volumes:
+      - rag-data:/data            # uploaded-document index survives rebuilds
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  frontend:
+    build: ./frontend
+    container_name: rag-frontend
+    ports:
+      - "${BIND_IP:-0.0.0.0}:3000:80"   # visit localhost:3000 in the browser
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - app-network
+
+volumes:
+  rag-data:
+
+networks:
+  app-network:
+    driver: bridge

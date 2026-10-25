@@ -1,0 +1,20 @@
+# Secrets - the most important lines in this file
+.env
+*.env
+!.env.example
+
+# Dependencies
+node_modules/
+venv/
+.venv/
+__pycache__/
+
+# Build output & local data
+dist/
+build/
+backend/data/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
